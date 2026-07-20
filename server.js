@@ -65,11 +65,12 @@ app.post('/api/signup', async (req, res) => {
       password,
       balance: 5000,
       portfolio: [],
+      history: [],
       createdAt: new Date()
     });
 
     const token = jwt.sign({ email }, AUTH_SECRET, { expiresIn: '30d' });
-    res.json({ token, user: { name, email, balance: 5000, portfolio: [] } });
+    res.json({ token, user: { name, email, balance: 5000, portfolio: [], history: [] } });
   } catch (err) {
     res.status(500).json({ error: 'Signup failed' });
   }
@@ -84,7 +85,7 @@ app.post('/api/login', async (req, res) => {
     if (!user) return res.status(401).json({ error: 'Invalid credentials' });
 
     const token = jwt.sign({ email }, AUTH_SECRET, { expiresIn: '30d' });
-    res.json({ token, user: { name: user.name, email: user.email, balance: user.balance, portfolio: user.portfolio || [] } });
+    res.json({ token, user: { name: user.name, email: user.email, balance: user.balance, portfolio: user.portfolio || [], history: user.history || [] } });
   } catch (err) {
     res.status(500).json({ error: 'Login failed' });
   }
@@ -92,14 +93,14 @@ app.post('/api/login', async (req, res) => {
   try {
     const user = await db.collection('users').findOne({ email: req.user.email });
     if (!user) return res.status(404).json({ error: 'User not found' });
-    res.json({ user: { name: user.name, email: user.email, balance: user.balance, portfolio: user.portfolio || [] } });
+    res.json({ user: { name: user.name, email: user.email, balance: user.balance, portfolio: user.portfolio || [], history: user.history || [] } });
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch user' });
   }
 });
 
 app.post('/api/trade', authenticate, async (req, res) => {
-  const { side, coinId, quantity, price } = req.body;
+  const { side, coinId, coinName, quantity, price } = req.body;
   if (!side || !coinId || !quantity || !price) return res.status(400).json({ error: 'Missing fields' });
 
   try {
@@ -110,20 +111,23 @@ app.post('/api/trade', authenticate, async (req, res) => {
     if (side === 'buy' && user.balance < cost) return res.status(400).json({ error: 'Insufficient balance' });
 
     const portfolio = user.portfolio || [];
+    const history = user.history || [];
     const idx = portfolio.findIndex(p => p.id === coinId);
 
     if (side === 'buy') {
       if (idx >= 0) {
         portfolio[idx].qty += quantity;
       } else {
-        portfolio.push({ id: coinId, qty: quantity, avgPrice: price });
+        portfolio.push({ id: coinId, name: coinName, qty: quantity, avgPrice: price, icon: '₿', color: '#F7931A' });
       }
-      await users.updateOne({ email: req.user.email }, { $set: { balance: user.balance - cost, portfolio } });
+      history.push({ side: 'buy', coinId, coinName, qty: quantity, usd: cost, price, time: new Date().toLocaleTimeString(), date: new Date() });
+      await users.updateOne({ email: req.user.email }, { $set: { balance: user.balance - cost, portfolio, history } });
     } else {
       if (idx < 0 || portfolio[idx].qty < quantity) return res.status(400).json({ error: 'Insufficient holdings' });
       portfolio[idx].qty -= quantity;
       if (portfolio[idx].qty <= 0) portfolio.splice(idx, 1);
-      await users.updateOne({ email: req.user.email }, { $set: { balance: user.balance + cost, portfolio } });
+      history.push({ side: 'sell', coinId, coinName, qty: quantity, usd: cost, price, time: new Date().toLocaleTimeString(), date: new Date() });
+      await users.updateOne({ email: req.user.email }, { $set: { balance: user.balance + cost, portfolio, history } });
     }
 
     res.json({ success: true });
@@ -145,6 +149,23 @@ app.get('/api/admin-users', authenticate, async (req, res) => {
     res.json({ users });
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch users' });
+  }
+});
+
+app.post('/api/admin-add-balance', authenticate, async (req, res) => {
+  const { email, amount } = req.body;
+  if (!email || !amount) return res.status(400).json({ error: 'Missing fields' });
+
+  try {
+    const users = db.collection('users');
+    const user = await users.findOne({ email });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const newBalance = user.balance + amount;
+    await users.updateOne({ email }, { $set: { balance: newBalance } });
+    res.json({ success: true, newBalance });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to add balance' });
   }
 });
 
