@@ -66,11 +66,12 @@ app.post('/api/signup', async (req, res) => {
       balance: 0,
       portfolio: [],
       history: [],
+      notifications: [],
       createdAt: new Date()
     });
 
     const token = jwt.sign({ email }, AUTH_SECRET, { expiresIn: '30d' });
-    res.json({ token, user: { name, email, balance: 0, portfolio: [], history: [] } });
+    res.json({ token, user: { name, email, balance: 0, portfolio: [], history: [], notifications: [] } });
   } catch (err) {
     res.status(500).json({ error: 'Signup failed' });
   }
@@ -85,7 +86,7 @@ app.post('/api/login', async (req, res) => {
     if (!user) return res.status(401).json({ error: 'Invalid credentials' });
 
     const token = jwt.sign({ email }, AUTH_SECRET, { expiresIn: '30d' });
-    res.json({ token, user: { name: user.name, email: user.email, balance: user.balance, portfolio: user.portfolio || [], history: user.history || [] } });
+    res.json({ token, user: { name: user.name, email: user.email, balance: user.balance, portfolio: user.portfolio || [], history: user.history || [], notifications: user.notifications || [] } });
   } catch (err) {
     res.status(500).json({ error: 'Login failed' });
   }
@@ -95,13 +96,12 @@ app.get('/api/me', authenticate, async (req, res) => {
   try {
     const user = await db.collection('users').findOne({ email: req.user.email });
     if (!user) return res.status(404).json({ error: 'User not found' });
-    res.json({ user: { name: user.name, email: user.email, balance: user.balance, portfolio: user.portfolio || [], history: user.history || [] } });
+    res.json({ user: { name: user.name, email: user.email, balance: user.balance, portfolio: user.portfolio || [], history: user.history || [], notifications: user.notifications || [] } });
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch user' });
   }
 });
-
-app.post('/api/trade', authenticate, async (req, res) => {
+                      app.post('/api/trade', authenticate, async (req, res) => {
   const { side, coinId, coinName, quantity, price } = req.body;
   if (!side || !coinId || !quantity || !price) return res.status(400).json({ error: 'Missing fields' });
 
@@ -124,17 +124,75 @@ app.post('/api/trade', authenticate, async (req, res) => {
       }
       history.push({ side: 'buy', coinId, coinName, qty: quantity, usd: cost, price, time: new Date().toLocaleTimeString(), date: new Date() });
       await users.updateOne({ email: req.user.email }, { $set: { balance: user.balance - cost, portfolio, history } });
+      
+      // Add notification
+      const notifications = user.notifications || [];
+      notifications.push({ type: 'trade', message: `Bought ${quantity.toFixed(6)} ${coinId}`, icon: '📈', time: new Date() });
+      await users.updateOne({ email: req.user.email }, { $set: { notifications } });
     } else {
       if (idx < 0 || portfolio[idx].qty < quantity) return res.status(400).json({ error: 'Insufficient holdings' });
       portfolio[idx].qty -= quantity;
       if (portfolio[idx].qty <= 0) portfolio.splice(idx, 1);
       history.push({ side: 'sell', coinId, coinName, qty: quantity, usd: cost, price, time: new Date().toLocaleTimeString(), date: new Date() });
       await users.updateOne({ email: req.user.email }, { $set: { balance: user.balance + cost, portfolio, history } });
+      
+      // Add notification
+      const notifications = user.notifications || [];
+      notifications.push({ type: 'trade', message: `Sold ${quantity.toFixed(6)} ${coinId}`, icon: '📉', time: new Date() });
+      await users.updateOne({ email: req.user.email }, { $set: { notifications } });
     }
 
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Trade failed' });
+  }
+});
+
+app.post('/api/send-message', authenticate, async (req, res) => {
+  const { recipientEmail, message } = req.body;
+  if (!recipientEmail || !message) return res.status(400).json({ error: 'Missing fields' });
+
+  try {
+    const users = db.collection('users');
+    const sender = await users.findOne({ email: req.user.email });
+    const recipient = await users.findOne({ email: recipientEmail });
+    
+    if (!recipient) return res.status(404).json({ error: 'User not found' });
+
+    const msg = {
+      from: sender.name,
+      fromEmail: req.user.email,
+      message,
+      time: new Date(),
+      read: false
+    };
+
+    await users.updateOne({ email: recipientEmail }, { $push: { messages: msg } });
+    
+    // Add notification
+    const notif = { type: 'message', message: `Message from ${sender.name}`, icon: '💬', time: new Date() };
+    await users.updateOne({ email: recipientEmail }, { $push: { notifications: notif } });
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to send message' });
+  }
+});
+                             app.get('/api/messages', authenticate, async (req, res) => {
+  try {
+    const user = await db.collection('users').findOne({ email: req.user.email });
+    res.json({ messages: user.messages || [] });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch messages' });
+  }
+});
+
+app.get('/api/notifications', authenticate, async (req, res) => {
+  try {
+    const user = await db.collection('users').findOne({ email: req.user.email });
+    res.json({ notifications: user.notifications || [] });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch notifications' });
   }
 });
 
@@ -152,7 +210,9 @@ app.get('/api/admin-users', authenticate, async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch users' });
   }
-});app.post('/api/admin-add-balance', authenticate, async (req, res) => {
+});
+
+app.post('/api/admin-add-balance', authenticate, async (req, res) => {
   const { email, amount } = req.body;
   if (!email || !amount) return res.status(400).json({ error: 'Missing fields' });
 
@@ -163,6 +223,11 @@ app.get('/api/admin-users', authenticate, async (req, res) => {
 
     const newBalance = user.balance + amount;
     await users.updateOne({ email }, { $set: { balance: newBalance } });
+    
+    // Add notification
+    const notif = { type: 'deposit', message: `Admin added $${amount.toLocaleString()}`, icon: '💰', time: new Date() };
+    await users.updateOne({ email }, { $push: { notifications: notif } });
+    
     res.json({ success: true, newBalance });
   } catch (err) {
     res.status(500).json({ error: 'Failed to add balance' });
