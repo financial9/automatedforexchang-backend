@@ -63,14 +63,14 @@ app.post('/api/signup', async (req, res) => {
       name,
       email,
       password,
-      balance: 5000,
+      balance: 0,
       portfolio: [],
       history: [],
       createdAt: new Date()
     });
 
     const token = jwt.sign({ email }, AUTH_SECRET, { expiresIn: '30d' });
-    res.json({ token, user: { name, email, balance: 5000, portfolio: [], history: [] } });
+    res.json({ token, user: { name, email, balance: 0, portfolio: [], history: [] } });
   } catch (err) {
     res.status(500).json({ error: 'Signup failed' });
   }
@@ -89,7 +89,9 @@ app.post('/api/login', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: 'Login failed' });
   }
-});app.get('/api/me', authenticate, async (req, res) => {
+});
+
+app.get('/api/me', authenticate, async (req, res) => {
   try {
     const user = await db.collection('users').findOne({ email: req.user.email });
     if (!user) return res.status(404).json({ error: 'User not found' });
@@ -150,9 +152,7 @@ app.get('/api/admin-users', authenticate, async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch users' });
   }
-});
-
-app.post('/api/admin-add-balance', authenticate, async (req, res) => {
+});app.post('/api/admin-add-balance', authenticate, async (req, res) => {
   const { email, amount } = req.body;
   if (!email || !amount) return res.status(400).json({ error: 'Missing fields' });
 
