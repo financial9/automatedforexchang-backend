@@ -101,7 +101,8 @@ app.get('/api/me', authenticate, async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch user' });
   }
 });
-                      app.post('/api/trade', authenticate, async (req, res) => {
+
+app.post('/api/trade', authenticate, async (req, res) => {
   const { side, coinId, coinName, quantity, price } = req.body;
   if (!side || !coinId || !quantity || !price) return res.status(400).json({ error: 'Missing fields' });
 
@@ -146,9 +147,7 @@ app.get('/api/me', authenticate, async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: 'Trade failed' });
   }
-});
-
-app.post('/api/send-message', authenticate, async (req, res) => {
+});app.post('/api/send-message', authenticate, async (req, res) => {
   const { recipientEmail, message } = req.body;
   if (!recipientEmail || !message) return res.status(400).json({ error: 'Missing fields' });
 
@@ -178,7 +177,8 @@ app.post('/api/send-message', authenticate, async (req, res) => {
     res.status(500).json({ error: 'Failed to send message' });
   }
 });
-                             app.get('/api/messages', authenticate, async (req, res) => {
+
+app.get('/api/messages', authenticate, async (req, res) => {
   try {
     const user = await db.collection('users').findOne({ email: req.user.email });
     res.json({ messages: user.messages || [] });
@@ -225,7 +225,7 @@ app.post('/api/admin-add-balance', authenticate, async (req, res) => {
     await users.updateOne({ email }, { $set: { balance: newBalance } });
     
     // Add notification
-    const notif = { type: 'deposit', message: `Admin added $${amount.toLocaleString()}`, icon: '💰', time: new Date() };
+    const notif = { type: 'deposit', message: `Deposited $${amount.toLocaleString()}`, icon: '💰', time: new Date() };
     await users.updateOne({ email }, { $push: { notifications: notif } });
     
     res.json({ success: true, newBalance });
